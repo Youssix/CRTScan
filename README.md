@@ -1,46 +1,82 @@
 # CRTScan
 
-User-mode DLL injection detection via CRT fingerprinting.
+CRTScan is a defensive user-mode prototype for detecting suspicious DLLs through
+C Runtime fingerprinting, PE structure analysis, and return-address inspection.
 
-Scans loaded modules in a process and flags ones that look manually mapped or injected. The idea is simple: legitimately loaded DLLs link against the CRT, have exception data (.pdata), security cookies, and valid signatures. Injected ones usually don't.
+The research idea is simple: injected or manually mapped payloads often differ
+from normal application DLLs in their signing state, import table shape, unwind
+metadata, security-cookie setup, and CRT initialization behavior. CRTScan turns
+those differences into a small scoring engine that can be studied and extended
+in an authorized lab.
 
-Also hooks a handful of common API functions and checks whether the return address belongs to a known signed module.
+## What is implemented
 
-## What it checks
+- loaded-module enumeration with `CreateToolhelp32Snapshot`
+- Authenticode signature checks through `WinVerifyTrust`
+- PE header parsing for x64 modules
+- `.pdata` / exception directory detection
+- load-config inspection for security-cookie metadata
+- import table counting and CRT import detection
+- basic suspicion scoring for anomalous modules
+- IAT hook prototypes for selected CRT initialization-related APIs
+- stack capture and return-address validation against signed modules
 
-For each loaded module:
-- Digital signature status
-- Presence of `.pdata` section (structured exception handling)
-- `__security_cookie` in `.data`
-- Import count (low count = suspicious)
-- CRT linkage (vcruntime140.dll, ucrtbase.dll)
+## Detection model
 
-Each check contributes to a suspicion score. High score = probably injected.
+CRTScan combines several weak signals rather than relying on one indicator:
 
-## Hook engine
+- unsigned module loaded into a signed process
+- missing x64 unwind metadata
+- missing security-cookie metadata
+- very small or sparse import table
+- absence of normal CRT linkage in a module that performs real work
+- calls into common initialization APIs from unsigned or unknown modules
 
-Patches IAT entries for:
-- `GetSystemTimeAsFileTime`
-- `QueryPerformanceCounter`
-- `GetCurrentProcessId`
-- `GetCurrentThreadId`
+The result is a research score, not a final verdict. The project is meant to
+show how these signals can be correlated, tuned, and validated.
 
-In each hook, captures the return address and walks the stack to see if the caller lives inside a legitimate module. Logs anything suspicious.
+## Build
 
-## Building
+Requirements:
 
-Visual Studio 2022, x64, Release. Open a Developer Command Prompt:
+- Visual Studio 2022
+- x64 Native Tools Command Prompt
 
+Build the prototype:
+
+```bat
+cl /W4 /O2 /DWIN32_LEAN_AND_MEAN src\main.c src\scanner.c src\hooks.c /Fe:crtscan.exe /link advapi32.lib wintrust.lib imagehlp.lib dbghelp.lib
 ```
-cl /W4 /O2 /DWIN32_LEAN_AND_MEAN src/main.c src/scanner.c src/hooks.c /Fe:crtscan.exe /link advapi32.lib wintrust.lib imagehlp.lib dbghelp.lib
+
+Run against the current process:
+
+```bat
+crtscan.exe
 ```
 
-Or just make a VS project, add the source files, set platform to x64. Nothing fancy.
+Run with a target PID:
 
-## Status
+```bat
+crtscan.exe 1234
+```
 
-Work in progress. The scoring heuristic needs tuning and the hook engine only covers a few functions right now. Stack walking is basic.
+## Current status
+
+CRTScan is a work-in-progress research tool. The scoring heuristic needs tuning
+against larger benign and malicious datasets. The IAT hook engine currently
+covers a small set of APIs and is designed for local experimentation, not
+enterprise deployment.
+
+## Responsible use
+
+This project is for defensive analysis, malware triage labs, and detection
+engineering research. It does not include injection, exploitation, persistence,
+or evasion functionality.
+
+## Related writeup
+
+- [CRT vs NoCRT Detection](https://youssix.github.io/2026/05/10/crt-nocrt-detection/)
 
 ## License
 
-None yet.
+MIT
